@@ -1,0 +1,4 @@
+# Track specific file types (for example, all video files)
+git lfs track "*.mp4"
+git lfs track "*.avi"
+git lfs track "*.h5"

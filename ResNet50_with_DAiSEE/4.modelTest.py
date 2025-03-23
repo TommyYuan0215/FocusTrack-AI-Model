@@ -2,13 +2,18 @@ import cv2
 import os
 import numpy as np
 import tensorflow as tf
-from tf_keras.models import load_model
-from tf_keras.applications.vgg16 import preprocess_input
+from tensorflow.keras.models import load_model
+from tensorflow.keras.applications.resnet50 import preprocess_input
 import mediapipe as mp
 from config.config import Config
 
 # Load the pre-trained model
-model = load_model(os.path.join(Config.MODEL_DIR, 'emotion_recognition_model.h5'))
+try:
+    model = load_model(os.path.join(Config.MODEL_DIR, 'emotion_recognition_model_test.h5'))
+    print("Model loaded successfully!")
+except Exception as e:
+    print(f"Error loading model: {e}")
+    exit(1)
 
 # Initialize MediaPipe Face Detection
 mp_face_detection = mp.solutions.face_detection

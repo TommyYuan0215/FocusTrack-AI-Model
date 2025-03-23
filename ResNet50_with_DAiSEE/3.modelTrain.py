@@ -13,8 +13,9 @@ from tqdm import tqdm
 from sklearn.metrics import precision_score, recall_score
 from config.config import Config
 
+
 class EmotionClassifier:
-    def __init__(self, data_dir=Config.PROCESSED_DATA_DIR, input_shape=(224, 224, 3), num_classes=4, learning_rate=1e-4, batch_size=32, epochs=30):
+    def __init__(self, data_dir=Config.PROCESSED_DATA_DIR, input_shape=(224, 224, 3), num_classes=4, learning_rate=1e-3, batch_size=32, epochs=20):
         self.data_dir = data_dir
         self.input_shape = input_shape
         self.num_classes = num_classes
@@ -28,22 +29,27 @@ class EmotionClassifier:
 
     def build_model(self):
         base_model = ResNet50(weights='imagenet', include_top=False, input_shape=self.input_shape)
-        for layer in base_model.layers[:100]:
+
+        # Unfreeze more layers for fine-tuning
+        for layer in base_model.layers[:50]:
             layer.trainable = False
-        
+        for layer in base_model.layers[50:]:
+            layer.trainable = True
+
         x = base_model.output
         x = GlobalAveragePooling2D()(x)
-        x = Dense(1024, activation='relu', kernel_regularizer=l2(0.001))(x)
+        x = Dense(256, activation='relu', kernel_regularizer=l2(0.005))(x)
         x = BatchNormalization()(x)
-        x = Dropout(0.6)(x)
-        x = Dense(512, activation='relu', kernel_regularizer=l2(0.001))(x)
-        x = Dropout(0.4)(x)
+        x = Dropout(0.5)(x)
+        x = Dense(128, activation='relu', kernel_regularizer=l2(0.005))(x)
+        x = BatchNormalization()(x)
+        x = Dropout(0.5)(x) 
         predictions = Dense(self.num_classes, activation='softmax')(x)
-        
+
         self.model = Model(inputs=base_model.input, outputs=predictions)
         self.model.compile(optimizer=Adam(learning_rate=self.learning_rate),
-                           loss='sparse_categorical_crossentropy',
-                           metrics=['accuracy'])
+                        loss='sparse_categorical_crossentropy',  
+                        metrics=['accuracy'])
     
     def prepare_data_generators(self):
         train_dir = os.path.join(self.data_dir, "Train")
@@ -59,6 +65,9 @@ class EmotionClassifier:
             shear_range=0.15,
             zoom_range=0.15,
             horizontal_flip=True,
+            vertical_flip=False,  # Add if appropriate for your dataset
+            brightness_range=[0.8, 1.2],
+            channel_shift_range=0.1,  # Slight color changes
             fill_mode='nearest'
         )
         val_datagen = ImageDataGenerator(preprocessing_function=preprocess_input)
@@ -66,8 +75,6 @@ class EmotionClassifier:
         
         print("Loading Data Generators")
         
-        # Flow from directory will automatically print "Found X images belonging to Y classes"
-        # but we'll also store and print it ourselves for clarity
         self.train_generator = train_datagen.flow_from_directory(
             train_dir, 
             target_size=self.input_shape[:2],
@@ -75,7 +82,6 @@ class EmotionClassifier:
             class_mode='sparse', 
             shuffle=True
         )
-        print(f"Train Dataset: Found {self.train_generator.samples} images belonging to {self.train_generator.num_classes} classes.")
         
         self.val_generator = val_datagen.flow_from_directory(
             val_dir, 
@@ -84,7 +90,6 @@ class EmotionClassifier:
             class_mode='sparse', 
             shuffle=False
         )
-        print(f"Validation Dataset: Found {self.val_generator.samples} images belonging to {self.val_generator.num_classes} classes.")
         
         self.test_generator = test_datagen.flow_from_directory(
             test_dir, 
@@ -93,12 +98,10 @@ class EmotionClassifier:
             class_mode='sparse', 
             shuffle=False
         )
-        print(f"Test Dataset: Found {self.test_generator.samples} images belonging to {self.test_generator.num_classes} classes.")
         
         print("Data Generating Complete...")
-            
-    
-    def train(self, checkpoint_filename='best_model.h5'):
+
+    def train(self, checkpoint_filename='best_model.weights.h5'):
         # Combine Config.MODEL_DIR with the filename
         checkpoint_path = os.path.join(Config.MODEL_DIR, checkpoint_filename)
         
@@ -107,9 +110,15 @@ class EmotionClassifier:
             os.makedirs(Config.MODEL_DIR)
             
         callbacks = [
-            ModelCheckpoint(checkpoint_path, monitor='val_accuracy', save_best_only=True, mode='max', verbose=1),
-            EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True, verbose=1),
-            ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6, verbose=1)
+            # Save only the best model based on validation accuracy
+            ModelCheckpoint(checkpoint_path, monitor='val_accuracy', save_best_only=True, 
+                            save_weights_only=True, mode='max', verbose=1),
+
+            # Stop training early if validation accuracy doesn't improve for 15 epochs
+            EarlyStopping(monitor='val_accuracy', patience=15, restore_best_weights=True, verbose=1),
+
+            # Reduce learning rate when validation accuracy plateaus (stagnates)
+            ReduceLROnPlateau(monitor='val_accuracy', factor=0.8, patience=2, min_lr=1e-5, verbose=1)
         ]
         
         history = self.model.fit(
@@ -121,8 +130,9 @@ class EmotionClassifier:
             callbacks=callbacks,
             verbose=1
         )
-    
+
         return history
+
     
     def evaluate(self):
         print("Evaluating model...")

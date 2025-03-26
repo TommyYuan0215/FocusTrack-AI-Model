@@ -12,6 +12,7 @@ class Config:
     
     # Data directories (with Raw Data and Processed Data)
     RAW_DIR = os.path.join(DATA_DIR, 'raw')
+    ORIGINAL_PROCESSED_DATA_DIR = os.path.join(DATA_DIR, 'original_processed')
     PROCESSED_DATA_DIR = os.path.join(DATA_DIR, 'processed')
     
     # Raw directories inside data directories

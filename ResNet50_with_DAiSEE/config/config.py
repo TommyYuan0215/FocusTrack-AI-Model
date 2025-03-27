@@ -14,6 +14,7 @@ class Config:
     RAW_DIR = os.path.join(DATA_DIR, 'raw')
     ORIGINAL_PROCESSED_DATA_DIR = os.path.join(DATA_DIR, 'original_processed')
     PROCESSED_DATA_DIR = os.path.join(DATA_DIR, 'processed')
+    BALANCE_PROCESSED_DATA_DIR = os.path.join(DATA_DIR, 'balance_processed')
     
     # Raw directories inside data directories
     DATASET_DIR = os.path.join(RAW_DIR, 'DataSet')

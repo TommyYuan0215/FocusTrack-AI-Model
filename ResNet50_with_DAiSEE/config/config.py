@@ -19,11 +19,6 @@ class Config:
     # Raw directories inside data directories
     DATASET_DIR = os.path.join(RAW_DIR, 'DataSet')
     LABELS_DIR = os.path.join(RAW_DIR, 'Labels')
-    
-    # Save the trained model
-    VGGFACE_VGG16_PATH = os.path.join(MODEL_DIR, 'vggface_daisee_model_vgg16.h5')
-    VGGFACE_RESNET50_PATH = os.path.join(MODEL_DIR, 'vggface_daisee_model_resnet50.h5')
-    VGGFACE_SENET50_PATH = os.path.join(MODEL_DIR, 'vggface_daisee_model_senet50.h5')
 
     # Label files
     LABEL_FILES = {

@@ -1,7 +1,7 @@
 import os
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.models import Model
+from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.layers import Dense, GlobalAveragePooling2D, Dropout, BatchNormalization
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 from tensorflow.keras.optimizers import Adam
@@ -12,7 +12,7 @@ from tensorflow.keras.applications import ResNet50
 from tensorflow.keras.applications.resnet50 import preprocess_input
 from tensorflow.keras.regularizers import l2
 from tensorflow.keras.losses import CategoricalCrossentropy, CategoricalFocalCrossentropy
-from tensorflow.keras import mixed_precision
+from sklearn.utils.class_weight import compute_class_weight
 
 from tqdm import tqdm
 from sklearn.metrics import classification_report, confusion_matrix, recall_score
@@ -129,20 +129,21 @@ class EmotionClassifier:
         self.model = Model(inputs=base_model.input, outputs=predictions)
         self.model.compile(
             optimizer = Adam(learning_rate=lr_schedule),
-            loss = CategoricalFocalCrossentropy(gamma=2),  
+            loss=CategoricalFocalCrossentropy(gamma=2.0), 
             metrics = ['accuracy', Precision(name='precision'), Recall(name='recall')]
         )
         
 
-    def train(self, checkpoint_filename='best_model.weights.h5'):
+    def train(self, checkpoint_filename='best_model.weights.h5', model_filename='emotion_recognition_model.h5'):
         checkpoint_path = os.path.join(Config.MODEL_DIR, checkpoint_filename)
+        model_save_path = os.path.join(Config.MODEL_DIR, model_filename)
         
         if not os.path.exists(Config.MODEL_DIR):
             os.makedirs(Config.MODEL_DIR)
 
         callbacks = [
             ModelCheckpoint(checkpoint_path, monitor='val_accuracy', save_best_only=True, save_weights_only=True, mode='max', verbose=1),
-            EarlyStopping(monitor='val_accuracy', patience=5, restore_best_weights=True, verbose=1)
+            EarlyStopping(monitor='val_accuracy', patience=10, restore_best_weights=True, verbose=1)
         ]
 
         history = self.model.fit(
@@ -155,46 +156,85 @@ class EmotionClassifier:
             verbose=1
         )
 
+        # Save the entire model after training
+        self.model.save(model_save_path)
+        print(f"Full model saved to {model_save_path}")
+
         return history
 
-    def evaluate(self):
-        print("Evaluating model...")
-        y_true, y_pred = [], []
+    def evaluate(self, model_filename='emotion_recognition_model.h5'):
+        # Load the saved model to ensure clean evaluation
+        model_path = os.path.join(Config.MODEL_DIR, model_filename)
+        loaded_model = load_model(model_path)
 
-        steps = len(self.test_generator)
-        for i, (X, y) in tqdm(enumerate(self.test_generator), total=steps, desc="Evaluating"):
-            preds = self.model.predict(X, verbose=0)
-            y_true.extend(np.argmax(y, axis=1))
-            y_pred.extend(np.argmax(preds, axis=1))
-            if i+1 >= steps:
-                break
+        try:
+            print("Evaluating model...")
+            y_true, y_pred = [], []
 
-        y_true = np.array(y_true[:len(y_pred)])
-        y_pred = np.array(y_pred[:len(y_true)])
+            steps = len(self.test_generator)
+            print(f"Total steps: {steps}")
 
-        print("\nClassification Report:")
-        class_names = list(self.test_generator.class_indices.keys())
-        print(classification_report(y_true, y_pred, target_names=class_names))
+            for i, batch in tqdm(enumerate(self.test_generator), total=steps, desc="Evaluating"):
+                try:
+                    if isinstance(batch, tuple) and len(batch) == 2:
+                        X, y = batch
+                    else:
+                        print(f"Unexpected batch format at step {i}: {type(batch)}, length={len(batch)}")
+                        continue
 
-        print("\nConfusion Matrix:")
-        print(confusion_matrix(y_true, y_pred))
+                    preds = loaded_model.predict(X, verbose=0)
+                    y_true.extend(np.argmax(y, axis=1))
+                    y_pred.extend(np.argmax(preds, axis=1))
 
-        recall_per_class = recall_score(y_true, y_pred, average=None)
-        for idx, emotion in enumerate(class_names):
-            print(f"Recall ({emotion}): {recall_per_class[idx]:.4f}")
+                    if i + 1 >= steps:
+                        break
+                except Exception as batch_error:
+                    print(f"Error processing batch {i}: {batch_error}")
+                    continue
 
-        loss, accuracy = self.model.evaluate(self.test_generator, verbose=1)
-        print(f"\nTest Accuracy: {accuracy:.4f}")
-    
-    def save_model(self, filepath=os.path.join(Config.MODEL_DIR, 'emotion_recognition_model.h5')):
-        if not os.path.exists(os.path.dirname(filepath)):
-            os.makedirs(os.path.dirname(filepath))
-        self.model.save(filepath)
-        print(f"Model saved to {filepath}")
+            y_true = np.array(y_true[:len(y_pred)])
+            y_pred = np.array(y_pred[:len(y_true)])
 
-# Set mixed policies        
-policy = mixed_precision.Policy('mixed_float16')
-mixed_precision.set_global_policy(policy)
+            # Classification Report
+            class_names = list(self.test_generator.class_indices.keys())
+            report = classification_report(y_true, y_pred, target_names=class_names, output_dict=True)
+            
+            print("\nClassification Report:")
+            print(classification_report(y_true, y_pred, target_names=class_names))
+
+            # Confusion Matrix
+            conf_matrix = confusion_matrix(y_true, y_pred)
+            print("\nConfusion Matrix:")
+            print(conf_matrix)
+
+            # Recall per class
+            recall_per_class = recall_score(y_true, y_pred, average=None)
+            for idx, emotion in enumerate(class_names):
+                print(f"Recall ({emotion}): {recall_per_class[idx]:.4f}")
+
+            # Model Evaluation
+            loss, accuracy = loaded_model.evaluate(self.test_generator, verbose=1)
+            print(f"\nTest Accuracy: {accuracy:.4f}")
+
+            # Optional: Save metrics to CSV
+            import pandas as pd
+            metrics_df = pd.DataFrame(report).transpose()
+            metrics_path = os.path.join(Config.MODEL_DIR, 'evaluation_metrics.csv')
+            metrics_df.to_csv(metrics_path)
+            print(f"Detailed metrics saved to {metrics_path}")
+
+            return {
+                'y_true': y_true,
+                'y_pred': y_pred,
+                'class_names': class_names,
+                'report': report,
+                'confusion_matrix': conf_matrix,
+                'accuracy': accuracy
+            }
+
+        except Exception as e:
+            print(f"Error during model evaluation: {e}")
+            return None
 
 if __name__ == "__main__":
     # Set memory growth to avoid GPU memory errors
@@ -208,4 +248,3 @@ if __name__ == "__main__":
     classifier.build_model()
     classifier.train()
     classifier.evaluate()
-    classifier.save_model()

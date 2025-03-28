@@ -2,10 +2,10 @@ import os
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.models import Model, load_model
-from tensorflow.keras.layers import Dense, GlobalAveragePooling2D, Dropout, BatchNormalization
+from tensorflow.keras.layers import Dense, GlobalAveragePooling2D, Dropout, BatchNormalization, ReLU
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.optimizers.schedules import CosineDecay
+from tensorflow.keras.optimizers.schedules import CosineDecayRestarts
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.metrics import Precision, Recall
 from tensorflow.keras.applications import ResNet50
@@ -13,6 +13,7 @@ from tensorflow.keras.applications.resnet50 import preprocess_input
 from tensorflow.keras.regularizers import l2
 from tensorflow.keras.losses import CategoricalCrossentropy, CategoricalFocalCrossentropy
 from sklearn.utils.class_weight import compute_class_weight
+from tensorflow.keras.mixed_precision import set_global_policy
 
 from tqdm import tqdm
 from sklearn.metrics import classification_report, confusion_matrix, recall_score
@@ -100,22 +101,22 @@ class EmotionClassifier:
         base_model = ResNet50(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
 
         # Freeze first 80 layer to perform training
-        for layer in base_model.layers[:80]:  
+        for layer in base_model.layers[:110]:  
             layer.trainable = False  
-        for layer in base_model.layers[80:]:  
+        for layer in base_model.layers[110:]:  
             layer.trainable = True
             
         x = base_model.output
         x = GlobalAveragePooling2D()(x)
 
-        x = Dense(256, kernel_regularizer=l2(0.0001))(x)
+        x = Dense(256, kernel_regularizer=l2(0.0001), use_bias=False)(x)
         x = BatchNormalization()(x)  
-        x = tf.keras.layers.ReLU()(x)
+        x = ReLU()(x)
         x = Dropout(0.5)(x)
 
-        x = Dense(128, kernel_regularizer=l2(0.0001))(x)
+        x = Dense(128, kernel_regularizer=l2(0.0001), use_bias=False)(x)
         x = BatchNormalization()(x) 
-        x = tf.keras.layers.ReLU()(x)
+        x = ReLU()(x)
         x = Dropout(0.4)(x)
 
         predictions = Dense(self.num_classes, activation='softmax')(x)
@@ -124,7 +125,13 @@ class EmotionClassifier:
         total_steps_per_epoch = len(self.train_generator)  # Total training batches
         decay_steps = total_steps_per_epoch * self.epochs
 
-        lr_schedule = CosineDecay(initial_learning_rate=self.learning_rate, decay_steps=decay_steps, alpha=1e-6)
+        lr_schedule = CosineDecayRestarts(
+            initial_learning_rate=self.learning_rate, 
+            first_decay_steps=decay_steps // 3,  
+            t_mul=2.0,  
+            m_mul=0.8,  
+            alpha=1e-6
+        )
 
         self.model = Model(inputs=base_model.input, outputs=predictions)
         self.model.compile(
@@ -242,6 +249,10 @@ if __name__ == "__main__":
     if physical_devices:
         for device in physical_devices:
             tf.config.experimental.set_memory_growth(device, True)
+            
+    print("Available GPUs:", tf.config.list_physical_devices('GPU'))
+    print("Is TensorFlow using GPU?", tf.test.is_built_with_cuda())
+    print("GPU device:", tf.test.gpu_device_name())
         
     classifier = EmotionClassifier()
     classifier.prepare_data_generators()

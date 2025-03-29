@@ -1,5 +1,4 @@
-import os
-import numpy as np
+# Tensorflow libraries (Deep Learn tasks)
 import tensorflow as tf
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.layers import Dense, GlobalAveragePooling2D, Dropout, BatchNormalization, ReLU
@@ -7,15 +6,16 @@ from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.optimizers.schedules import CosineDecayRestarts
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from tensorflow.keras.metrics import Precision, Recall
 from tensorflow.keras.applications import ResNet50
 from tensorflow.keras.applications.resnet50 import preprocess_input
 from tensorflow.keras.regularizers import l2
 from tensorflow.keras.losses import CategoricalCrossentropy, CategoricalFocalCrossentropy
-from sklearn.utils.class_weight import compute_class_weight
-from tensorflow.keras.mixed_precision import set_global_policy
+from tensorflow.keras.metrics import Precision, Recall
 
-from tqdm import tqdm
+# Common Libraries
+import os
+import numpy as np
+import pandas as pd
 from sklearn.metrics import classification_report, confusion_matrix, recall_score
 from config.config import Config
 
@@ -46,13 +46,13 @@ class EmotionClassifier:
         test_dir = os.path.join(self.data_dir, "Test")
 
         train_datagen = ImageDataGenerator(
-            rotation_range=10,  
-            width_shift_range=0.1,  
-            height_shift_range=0.1,  
+            rotation_range=15,  
+            width_shift_range=0.05,  
+            height_shift_range=0.05,  
             zoom_range=0.1,  
             horizontal_flip=True,
             brightness_range=[0.8, 1.2],  
-            shear_range=0.1,  
+            shear_range=0.05,  
             fill_mode='nearest',  
             preprocessing_function=preprocess_input
         )
@@ -97,37 +97,38 @@ class EmotionClassifier:
         test_labels = self.test_generator.classes
         self.print_class_distribution(test_labels)
 
+
     def build_model(self):
         base_model = ResNet50(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
 
-        # Freeze first 80 layer to perform training
-        for layer in base_model.layers[:110]:  
+        # Freeze first 80 layers (instead of 110)
+        for layer in base_model.layers[:80]:  
             layer.trainable = False  
-        for layer in base_model.layers[110:]:  
+        for layer in base_model.layers[80:]:  
             layer.trainable = True
-            
+
         x = base_model.output
         x = GlobalAveragePooling2D()(x)
 
-        x = Dense(256, kernel_regularizer=l2(0.0001), use_bias=False)(x)
+        x = Dense(256, kernel_regularizer=l2(0.001))(x)  # Reduced L2 regularization
         x = BatchNormalization()(x)  
         x = ReLU()(x)
         x = Dropout(0.5)(x)
 
-        x = Dense(128, kernel_regularizer=l2(0.0001), use_bias=False)(x)
+        x = Dense(128, kernel_regularizer=l2(0.001))(x)  # Reduced L2 regularization
         x = BatchNormalization()(x) 
         x = ReLU()(x)
         x = Dropout(0.4)(x)
 
         predictions = Dense(self.num_classes, activation='softmax')(x)
         
-        # Decay steps modification
-        total_steps_per_epoch = len(self.train_generator)  # Total training batches
-        decay_steps = total_steps_per_epoch * self.epochs
+        # Fixed decay steps calculation
+        total_steps_per_epoch = len(self.train_generator)  
+        first_decay_steps = total_steps_per_epoch * (self.epochs // 3)  
 
         lr_schedule = CosineDecayRestarts(
             initial_learning_rate=self.learning_rate, 
-            first_decay_steps=decay_steps // 3,  
+            first_decay_steps=first_decay_steps,  
             t_mul=2.0,  
             m_mul=0.8,  
             alpha=1e-6
@@ -135,9 +136,9 @@ class EmotionClassifier:
 
         self.model = Model(inputs=base_model.input, outputs=predictions)
         self.model.compile(
-            optimizer = Adam(learning_rate=lr_schedule),
+            optimizer=Adam(learning_rate=lr_schedule),
             loss=CategoricalFocalCrossentropy(gamma=2.0), 
-            metrics = ['accuracy', Precision(name='precision'), Recall(name='recall')]
+            metrics=['accuracy', Precision(name='precision'), Recall(name='recall')] 
         )
         
 
@@ -169,47 +170,29 @@ class EmotionClassifier:
 
         return history
 
+
     def evaluate(self, model_filename='emotion_recognition_model.h5'):
-        # Load the saved model to ensure clean evaluation
-        model_path = os.path.join(Config.MODEL_DIR, model_filename)
-        loaded_model = load_model(model_path)
 
         try:
-            print("Evaluating model...")
-            y_true, y_pred = [], []
+            # Load saved model
+            model_path = os.path.join(Config.MODEL_DIR, model_filename)
+            model = load_model(model_path)
+            print("Model loaded successfully.")
 
-            steps = len(self.test_generator)
-            print(f"Total steps: {steps}")
-
-            for i, batch in tqdm(enumerate(self.test_generator), total=steps, desc="Evaluating"):
-                try:
-                    if isinstance(batch, tuple) and len(batch) == 2:
-                        X, y = batch
-                    else:
-                        print(f"Unexpected batch format at step {i}: {type(batch)}, length={len(batch)}")
-                        continue
-
-                    preds = loaded_model.predict(X, verbose=0)
-                    y_true.extend(np.argmax(y, axis=1))
-                    y_pred.extend(np.argmax(preds, axis=1))
-
-                    if i + 1 >= steps:
-                        break
-                except Exception as batch_error:
-                    print(f"Error processing batch {i}: {batch_error}")
-                    continue
-
-            y_true = np.array(y_true[:len(y_pred)])
-            y_pred = np.array(y_pred[:len(y_true)])
-
-            # Classification Report
+            # Get true labels
+            y_true = self.test_generator.classes  # True class labels
             class_names = list(self.test_generator.class_indices.keys())
+
+            # Predict in one go (no manual looping)
+            y_pred_probs = model.predict(self.test_generator, verbose=1)
+            y_pred = np.argmax(y_pred_probs, axis=1)
+
+            # Classification report
             report = classification_report(y_true, y_pred, target_names=class_names, output_dict=True)
-            
             print("\nClassification Report:")
             print(classification_report(y_true, y_pred, target_names=class_names))
 
-            # Confusion Matrix
+            # Confusion matrix
             conf_matrix = confusion_matrix(y_true, y_pred)
             print("\nConfusion Matrix:")
             print(conf_matrix)
@@ -219,12 +202,11 @@ class EmotionClassifier:
             for idx, emotion in enumerate(class_names):
                 print(f"Recall ({emotion}): {recall_per_class[idx]:.4f}")
 
-            # Model Evaluation
-            loss, accuracy = loaded_model.evaluate(self.test_generator, verbose=1)
+            # Calculate accuracy manually
+            accuracy = np.mean(y_true == y_pred)
             print(f"\nTest Accuracy: {accuracy:.4f}")
 
-            # Optional: Save metrics to CSV
-            import pandas as pd
+            # Save evaluation metrics to CSV
             metrics_df = pd.DataFrame(report).transpose()
             metrics_path = os.path.join(Config.MODEL_DIR, 'evaluation_metrics.csv')
             metrics_df.to_csv(metrics_path)

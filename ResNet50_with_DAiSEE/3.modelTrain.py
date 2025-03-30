@@ -1,10 +1,10 @@
 # Tensorflow libraries (Deep Learn tasks)
 import tensorflow as tf
 from tensorflow.keras.models import Model, load_model
-from tensorflow.keras.layers import Dense, GlobalAveragePooling2D, Dropout, BatchNormalization, ReLU
+from tensorflow.keras.layers import Dense, GlobalAveragePooling2D, Dropout, BatchNormalization
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.optimizers.schedules import CosineDecayRestarts
+from tensorflow.keras.optimizers.schedules import CosineDecay
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.applications import ResNet50
 from tensorflow.keras.applications.resnet50 import preprocess_input
@@ -19,8 +19,27 @@ import pandas as pd
 from sklearn.metrics import classification_report, confusion_matrix, recall_score
 from config.config import Config
 
+class F1Score(tf.keras.metrics.Metric):
+    def __init__(self, name='f1_score', **kwargs):
+        super().__init__(name=name, **kwargs)
+        self.precision = Precision()
+        self.recall = Recall()
+        
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        self.precision.update_state(y_true, y_pred, sample_weight)
+        self.recall.update_state(y_true, y_pred, sample_weight)
+        
+    def reset_state(self):
+        self.precision.reset_state()
+        self.recall.reset_state()
+        
+    def result(self):
+        p = self.precision.result()
+        r = self.recall.result()
+        return 2 * ((p * r) / (p + r + tf.keras.backend.epsilon()))
+
 class EmotionClassifier:
-    def __init__(self, data_dir=Config.BALANCE_PROCESSED_DATA_DIR, input_shape=(224, 224, 3), num_classes=3, learning_rate=1e-5, batch_size=32, epochs=30):
+    def __init__(self, data_dir=Config.BALANCE_PROCESSED_DATA_DIR, input_shape=(224, 224, 3), num_classes=3, learning_rate=1e-4, batch_size=32, epochs=30):
         self.data_dir = data_dir
         self.input_shape = input_shape
         self.num_classes = num_classes
@@ -39,6 +58,20 @@ class EmotionClassifier:
         for cls, count in zip(unique, counts): 
             percentage = (count / total) * 100 
             print(f"Class {cls}: {count} samples ({percentage:.2f}%)")
+            
+    def prepare_val_class_weights(self):
+        # Based on validation set distribution (closer to real-world)
+        val_labels = self.val_generator.classes
+        unique, counts = np.unique(val_labels, return_counts=True)
+        total = len(val_labels)
+        
+        # Compute weights: less frequent classes get higher weights
+        class_weights = {}
+        for i, count in enumerate(counts):
+            class_weights[i] = total / (len(counts) * count)
+            
+        print("Class weights:", class_weights)
+        return class_weights 
         
     def prepare_data_generators(self):
         train_dir = os.path.join(self.data_dir, "Train")
@@ -46,14 +79,14 @@ class EmotionClassifier:
         test_dir = os.path.join(self.data_dir, "Test")
 
         train_datagen = ImageDataGenerator(
-            rotation_range=15,  
-            width_shift_range=0.05,  
-            height_shift_range=0.05,  
-            zoom_range=0.1,  
+            rotation_range=40,
+            width_shift_range=0.2,
+            height_shift_range=0.2,
+            zoom_range=0.1,
             horizontal_flip=True,
-            brightness_range=[0.8, 1.2],  
-            shear_range=0.05,  
-            fill_mode='nearest',  
+            brightness_range=[0.6, 1.4],
+            shear_range=0.2,
+            fill_mode='nearest',
             preprocessing_function=preprocess_input
         )
 
@@ -101,7 +134,7 @@ class EmotionClassifier:
     def build_model(self):
         base_model = ResNet50(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
 
-        # Freeze first 80 layers (instead of 110)
+        # Freeze first 50 layers
         for layer in base_model.layers[:80]:  
             layer.trainable = False  
         for layer in base_model.layers[80:]:  
@@ -110,35 +143,32 @@ class EmotionClassifier:
         x = base_model.output
         x = GlobalAveragePooling2D()(x)
 
-        x = Dense(256, kernel_regularizer=l2(0.001))(x)  # Reduced L2 regularization
-        x = BatchNormalization()(x)  
-        x = ReLU()(x)
+        x = Dense(256, activation='relu', kernel_regularizer=l2(0.0005))(x) 
         x = Dropout(0.5)(x)
 
-        x = Dense(128, kernel_regularizer=l2(0.001))(x)  # Reduced L2 regularization
-        x = BatchNormalization()(x) 
-        x = ReLU()(x)
+        x = Dense(128, activation='relu', kernel_regularizer=l2(0.0005))(x)
         x = Dropout(0.4)(x)
 
         predictions = Dense(self.num_classes, activation='softmax')(x)
         
         # Fixed decay steps calculation
-        total_steps_per_epoch = len(self.train_generator)  
-        first_decay_steps = total_steps_per_epoch * (self.epochs // 3)  
+        total_steps_per_epoch = len(self.train_generator)  # Steps per epoch
+        total_training_steps = total_steps_per_epoch * self.epochs  # Total training steps
+        warmup_steps = int(0.1 * total_training_steps) # 10% of total steps
 
-        lr_schedule = CosineDecayRestarts(
+        lr_schedule = CosineDecay(
             initial_learning_rate=self.learning_rate, 
-            first_decay_steps=first_decay_steps,  
-            t_mul=2.0,  
-            m_mul=0.8,  
-            alpha=1e-6
+            decay_steps=total_steps_per_epoch,  
+            alpha=1e-5, 
+            warmup_target=1e-4,
+            warmup_steps=warmup_steps
         )
 
         self.model = Model(inputs=base_model.input, outputs=predictions)
         self.model.compile(
             optimizer=Adam(learning_rate=lr_schedule),
-            loss=CategoricalFocalCrossentropy(gamma=2.0), 
-            metrics=['accuracy', Precision(name='precision'), Recall(name='recall')] 
+            loss=CategoricalFocalCrossentropy(gamma=2.5), 
+            metrics=['accuracy', Precision(name='precision'), Recall(name='recall'), F1Score(name='f1')] 
         )
         
 
@@ -153,6 +183,7 @@ class EmotionClassifier:
             ModelCheckpoint(checkpoint_path, monitor='val_accuracy', save_best_only=True, save_weights_only=True, mode='max', verbose=1),
             EarlyStopping(monitor='val_accuracy', patience=10, restore_best_weights=True, verbose=1)
         ]
+    
 
         history = self.model.fit(
             self.train_generator,

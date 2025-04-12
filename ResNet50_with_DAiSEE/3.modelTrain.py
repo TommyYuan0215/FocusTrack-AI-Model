@@ -1,13 +1,13 @@
 import tensorflow as tf
 from tensorflow.keras.models import Model, load_model
-from tensorflow.keras.layers import Dense, GlobalAveragePooling2D, Dropout, Activation, BatchNormalization, RandomFlip, RandomRotation, RandomZoom
+from tensorflow.keras.layers import Dense, GlobalAveragePooling2D, Dropout, Activation, BatchNormalization
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.optimizers.schedules import CosineDecay
 from tensorflow.keras.applications import ResNet50
 from tensorflow.keras.applications.resnet50 import preprocess_input
 from tensorflow.keras.regularizers import l2
-from tensorflow.keras.losses import CategoricalFocalCrossentropy
+from tensorflow.keras.losses import CategoricalFocalCrossentropy, CategoricalCrossentropy
 from tensorflow.keras.metrics import Precision, Recall
 from tensorflow.keras.preprocessing import image_dataset_from_directory
 
@@ -34,7 +34,7 @@ class F1Score(tf.keras.metrics.Metric):
         return 2 * ((p * r) / (p + r + tf.keras.backend.epsilon()))
 
 class EmotionClassifier:
-    def __init__(self, data_dir=Config.BALANCE_PROCESSED_DATA_DIR, input_shape=(224, 224, 3), num_classes=3, learning_rate=5e-6, batch_size=32, epochs=30):
+    def __init__(self, data_dir=Config.BALANCE_PROCESSED_DATA_DIR, input_shape=(224, 224, 3), num_classes=3, learning_rate=1e-5, batch_size=32, epochs=50):
         self.data_dir = data_dir
         self.input_shape = input_shape
         self.num_classes = num_classes
@@ -103,14 +103,28 @@ class EmotionClassifier:
         train_dir = os.path.join(self.data_dir, "Train")
         val_dir = os.path.join(self.data_dir, "Validation")
         test_dir = os.path.join(self.data_dir, "Test")
-
-        # Cache data only on disk, if RAM is insufficient
+        
+        # More aggressive data augmentation
+        data_augmentation = tf.keras.Sequential([
+            tf.keras.layers.RandomFlip("horizontal"),
+            tf.keras.layers.RandomRotation(0.2),              
+            tf.keras.layers.RandomZoom(0.2),                  
+            tf.keras.layers.RandomContrast(0.2),             
+            tf.keras.layers.RandomBrightness(0.2),            
+            tf.keras.layers.RandomTranslation(0.1, 0.1)       
+        ])
+        
+        # The rest remains the same
         self.train_dataset = image_dataset_from_directory(
             train_dir,
             image_size=input_shape,
             batch_size=batch_size,
             label_mode="categorical"
-        ).map(lambda x, y: (preprocess_input(x), y)).prefetch(tf.data.AUTOTUNE)
+        ).map(
+            lambda x, y: (data_augmentation(x, training=True), y) 
+        ).map(
+            lambda x, y: (preprocess_input(x), y) 
+        ).prefetch(tf.data.AUTOTUNE)
 
         self.val_dataset = image_dataset_from_directory(
             val_dir,
@@ -132,56 +146,54 @@ class EmotionClassifier:
 
 
     def build_model(self):
+        # Initialize ResNet50 with ImageNet weights
         base_model = ResNet50(weights='imagenet', include_top=False, input_shape=self.input_shape)
-
-        # Freeze only early layers
-        for layer in base_model.layers[:80]:  # Freeze only first layers
-            layer.trainable = False
         
-        # Make later layers trainable
-        for layer in base_model.layers[80:]:
-            layer.trainable = True
-
+        # Initially freeze the entire base model
+        base_model.trainable = False
+        
+        # Create model architecture
         x = base_model.output
-        
         x = GlobalAveragePooling2D()(x)
-
-        x = Dense(512, kernel_regularizer=l2(0.001))(x)
+        
+        # Enhanced feature extraction head
+        x = Dense(128, kernel_regularizer=l2(0.001))(x)       
         x = BatchNormalization()(x)
         x = Activation('relu')(x)
-        x = Dropout(0.5)(x)
-
-        # Intermediate layer for smoother reduction
-        x = Dense(256, kernel_regularizer=l2(0.001))(x)
+        x = Dropout(0.5)(x)                                    
+        
+        x = Dense(64, kernel_regularizer=l2(0.001))(x)         
         x = BatchNormalization()(x)
         x = Activation('relu')(x)
-        x = Dropout(0.4)(x)
-
-        x = Dense(128, kernel_regularizer=l2(0.001))(x)
-        x = BatchNormalization()(x)
-        x = Activation('relu')(x)
-        x = Dropout(0.3)(x)
-
+        x = Dropout(0.5)(x)                                    
+        
         predictions = Dense(self.num_classes, activation='softmax')(x)
-
-        total_steps_per_epoch = len(self.train_dataset)
-        total_training_steps = total_steps_per_epoch * self.epochs
-        warmup_steps = int(0.1 * total_training_steps)
-
-        lr_schedule = CosineDecay(
-            initial_learning_rate=self.learning_rate, 
-            decay_steps=total_training_steps,  
-            alpha=1e-6, 
-            warmup_target=1e-4,
-            warmup_steps=warmup_steps
-        )
-
+        
+        # Create and compile the model
         self.model = Model(inputs=base_model.input, outputs=predictions)
+        
+        # Use a moderate learning rate to start
         self.model.compile(
-            optimizer=Adam(learning_rate=lr_schedule),
-            loss=CategoricalFocalCrossentropy(gamma=5.0),
+            optimizer=Adam(learning_rate=1e-4),
+            loss=CategoricalCrossentropy(),
             metrics=['accuracy', Precision(name='precision'), Recall(name='recall'), F1Score(name='f1')]
         )
+        
+        # After some initial training, you can unfreeze some layers
+        # Unfreeze the last 50 layers of the ResNet model
+        for layer in base_model.layers[:-50]:
+            layer.trainable = False
+        for layer in base_model.layers[-50:]:
+            layer.trainable = True
+        
+        # Recompile with a lower learning rate for fine-tuning
+        self.model.compile(
+            optimizer=Adam(learning_rate=1e-5),
+            loss=CategoricalCrossentropy(),
+            metrics=['accuracy', Precision(name='precision'), Recall(name='recall'), F1Score(name='f1')]
+        )
+        
+        return self.model
 
     def train(self, checkpoint_filename='best_model.weights.h5', model_filename='emotion_recognition_model.h5'):
         checkpoint_path = os.path.join(Config.MODEL_DIR, checkpoint_filename)
@@ -190,28 +202,69 @@ class EmotionClassifier:
         if not os.path.exists(Config.MODEL_DIR):
             os.makedirs(Config.MODEL_DIR)
             
-        # Compute class weights from validation set
-        class_weights = self.get_class_weights(self.val_dataset)
+        # Calculate class weights
+        class_weights = self.get_class_weights(self.train_dataset)
         
-        # use val_f1 instead of val_accuracy, due to need to make sure high f1 score, so it means that all class can recognize well.
-        callbacks = [
-            ModelCheckpoint(checkpoint_path, monitor='val_f1', save_best_only=True, save_weights_only=True, mode='max', verbose=1),
-            EarlyStopping(monitor='val_f1', patience=10, mode='max', restore_best_weights=True, verbose=1)
+        # Phase 1: Train only the top layers (base model is frozen)
+        print("Phase 1: Training with frozen base model...")
+        callbacks_phase1 = [
+            EarlyStopping(monitor='val_f1', patience=5, mode='max', restore_best_weights=True, verbose=1)
         ]
-
-        history = self.model.fit(
+        
+        history1 = self.model.fit(
             self.train_dataset,
             validation_data=self.val_dataset,
-            epochs=self.epochs,
-            callbacks=callbacks,
+            epochs=15,
+            callbacks=callbacks_phase1,
             class_weight=class_weights,
             verbose=1
         )
-
+        
+        # Phase 2: Fine-tune with gradually unfrozen layers
+        print("Phase 2: Fine-tuning with partially unfrozen model...")
+        
+        # Get the base model (first layer in the model)
+        base_model = self.model.layers[0]
+        
+        # Unfreeze only the last 20 layers (reduced from 50)
+        for layer in base_model.layers[:-20]:
+            layer.trainable = False
+        for layer in base_model.layers[-20:]:
+            layer.trainable = True
+        
+        # Recompile with a much lower learning rate
+        self.model.compile(
+            optimizer=Adam(learning_rate=1e-6),  # Reduced from 1e-5
+            loss=CategoricalCrossentropy(),
+            metrics=['accuracy', Precision(name='precision'), Recall(name='recall'), F1Score(name='f1')]
+        )
+        
+        # Continue training with fine-tuning
+        callbacks_phase2 = [
+            ModelCheckpoint(checkpoint_path, monitor='val_f1', save_best_only=True, save_weights_only=True, 
+                        mode='max', verbose=1),
+            EarlyStopping(monitor='val_f1', patience=10, mode='max', restore_best_weights=True, verbose=1)
+        ]
+        
+        history2 = self.model.fit(
+            self.train_dataset,
+            validation_data=self.val_dataset,
+            epochs=35,
+            callbacks=callbacks_phase2,
+            class_weight=class_weights,
+            verbose=1
+        )
+        
+        # Save the final model
         self.model.save(model_save_path)
         print(f"Full model saved to {model_save_path}")
-
-        return history
+        
+        # Combine histories for returning
+        combined_history = {}
+        for key in history1.history.keys():
+            combined_history[key] = history1.history[key] + history2.history[key]
+        
+        return combined_history
 
     def evaluate(self, model_filename='emotion_recognition_model.h5'):
         model_path = os.path.join(Config.MODEL_DIR, model_filename)
@@ -269,7 +322,7 @@ class EmotionClassifier:
 if __name__ == "__main__":
     classifier = EmotionClassifier()
     classifier.load_data()
-    classifier.print_class_distribution() # Print class distribution
+    # classifier.print_class_distribution()
     classifier.build_model()
     classifier.train()
     classifier.evaluate()

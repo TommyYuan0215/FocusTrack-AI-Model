@@ -20,12 +20,7 @@ __pycache__/
 .venv_win/
 
 # Ignore data (raw and processed) by default
-ResNet50_with_DAiSEE/data/*
-ResNet50_with_DAiSEE/models/*
+data/*
 
 # Project-specific archived directories
 **/archived/
-
-# Ignore other models (due to its no need already)
-GazeTracking/
-mediapipepose.py

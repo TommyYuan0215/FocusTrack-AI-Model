@@ -16,11 +16,18 @@ __pycache__/
 *.sln
 *.sw?
 
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
 # Ignore venv files
 .venv_win/
 
 # Ignore data (raw and processed) by default
 data/*
+
+# Large model files
+models/*.h5
+models/*.weights.h5
 
 # Project-specific archived directories
 **/archived/

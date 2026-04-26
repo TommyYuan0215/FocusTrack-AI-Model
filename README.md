@@ -8,7 +8,7 @@
 ![NumPy](https://img.shields.io/badge/NumPy-013243?logo=numpy&logoColor=white)
 ![Pandas](https://img.shields.io/badge/Pandas-150458?logo=pandas&logoColor=white)
 
-A deep learning-based emotion recognition system for detecting student engagement levels using the DAiSEE (Dataset for Affective States in E-Environments) dataset. This project uses ResNet50 transfer learning to classify student emotions into three categories: **Bored**, **Interested**, and **Lacking Focus**.
+A deep learning-based emotion recognition system for detecting student engagement levels using the DAiSEE (Dataset for Affective States in E-Environments) dataset. This project uses MobileNetV2 transfer learning to classify student emotions into three categories: **Bored**, **Interested**, and **Lacking Focus**.
 
 ## Table of Contents 📋
 
@@ -31,11 +31,12 @@ FocusTrack AI Model is designed to automatically detect and classify student eng
 ## Features ✨
 
 - **Automated Video Processing**: Extract and preprocess frames from video files
-- **Face Detection**: Support for both Haar Cascade (fast) and MTCNN (accurate) face detection
+- **Face Detection**: Haar Cascade-based face detection and cropping
 - **Data Balancing**: Intelligent dataset balancing to handle class imbalance
-- **Transfer Learning**: ResNet50 pre-trained on ImageNet with custom classification head
+- **Transfer Learning**: MobileNetV2 pre-trained on ImageNet with custom classification head
 - **Two-Phase Training**: Frozen base model training followed by fine-tuning
 - **Comprehensive Evaluation**: Detailed metrics including precision, recall, F1-score, and confusion matrix
+- **Real-Time Inference**: Webcam-based real-time emotion detection using MediaPipe
 - **Multi-processing Support**: Parallel video processing for faster preprocessing
 
 ## Project Structure 📁
@@ -44,7 +45,7 @@ FocusTrack AI Model is designed to automatically detect and classify student eng
 FocusTrack-AI-Model/
 │
 ├── config/
-│   ├── config.py                          # Configuration settings
+│   ├── config.py                          # Centralized configuration
 │   └── haarcascade_frontalface_default.xml # Face detection cascade
 │
 ├── data/
@@ -72,18 +73,18 @@ FocusTrack-AI-Model/
 │   ├── best_model.weights.h5              # Best model weights
 │   └── evaluation_metrics.csv             # Model evaluation results
 │
-├── 0.download_daisee.py                   # Dataset download script
-├── 1.preprocess_daisee.py                 # Video preprocessing pipeline
-├── 2.balance_daisee_dataset.py            # Dataset balancing script
-├── 3.modelTrain.py                        # Model training script
-├── 4.modelTest.py                         # Model evaluation script
-├── main.ipynb                             # Main Jupyter notebook
-├── model_train.ipynb                      # Training notebook
+├── step1_download.py                      # Step 1: Download DAiSEE dataset
+├── step2_preprocess.py                    # Step 2: Video preprocessing pipeline
+├── step3_balance.py                       # Step 3: Dataset balancing
+├── step4_train.py                         # Step 4: Model training & evaluation
+├── step5_inference.py                     # Step 5: Real-time webcam inference
+├── check_gpu.py                           # GPU/CUDA verification utility
+├── main.ipynb                             # Main Jupyter notebook (with outputs)
 ├── requirements_resnet50_daisee.txt       # Python dependencies
 └── README.md                              # This file
 ```
 
-## Requirements🔧
+## Requirements 🔧
 
 - Python 3.8+
 - TensorFlow 2.x
@@ -117,7 +118,7 @@ See [`requirements_resnet50_daisee.txt`](requirements_resnet50_daisee.txt) for c
 
 4. **Verify CUDA installation** (optional, for GPU support)
    ```bash
-   python Nvidia_CUDA_CuDNN.py
+   python check_gpu.py
    ```
 
 ## Usage 🚀
@@ -127,7 +128,7 @@ See [`requirements_resnet50_daisee.txt`](requirements_resnet50_daisee.txt) for c
 Download the DAiSEE dataset and extract it to the `data/raw` directory:
 
 ```bash
-python 0.download_daisee.py
+python step1_download.py
 ```
 
 > **Note**: You'll need to update the download URL in the script with the actual DAiSEE dataset link.
@@ -137,13 +138,13 @@ python 0.download_daisee.py
 Extract frames from videos and detect faces:
 
 ```bash
-python 1.preprocess_daisee.py
+python step2_preprocess.py
 ```
 
 This script will:
 
 - Extract frames from each video at 1-second intervals
-- Detect and align faces using Haar Cascade or MTCNN
+- Detect and crop faces using Haar Cascade
 - Save processed frames to `data/processed/`
 - Generate `metadata.csv` with processing statistics
 
@@ -152,7 +153,7 @@ This script will:
 Balance the dataset to handle class imbalance:
 
 ```bash
-python 2.balance_daisee_dataset.py
+python step3_balance.py
 ```
 
 This creates a balanced version of the dataset in `data/balance_processed/`.
@@ -162,7 +163,7 @@ This creates a balanced version of the dataset in `data/balance_processed/`.
 Train the emotion recognition model:
 
 ```bash
-python 3.modelTrain.py
+python step4_train.py
 ```
 
 Training uses a two-phase approach:
@@ -170,21 +171,21 @@ Training uses a two-phase approach:
 - **Phase 1**: Train classification head with frozen ResNet50 base
 - **Phase 2**: Fine-tune last 30 layers of ResNet50
 
-### Step 5: Evaluate Model
+After training completes, the model is automatically evaluated on the test set.
 
-Evaluate the trained model on the test set:
+### Step 5: Real-Time Inference
+
+Run real-time emotion detection using your webcam:
 
 ```bash
-python 4.modelTest.py
+python step5_inference.py
 ```
 
-This generates:
+This opens a webcam feed with:
 
-- Classification report
-- Confusion matrix
-- Per-class recall scores
-- Overall accuracy
-- Detailed metrics CSV
+- Face detection using MediaPipe
+- Emotion prediction with confidence scores
+- Press `q` to quit
 
 ## Dataset Structure 📊
 
@@ -212,22 +213,18 @@ Each label CSV contains columns:
 
 ## Model Architecture 🧠
 
-The model uses **ResNet50** as the backbone with a custom classification head:
+The model uses **MobileNetV2** as the backbone with a custom classification head:
 
 ```
 Input (224x224x3)
     ↓
 Data Augmentation (Random Flip, Rotation)
     ↓
-ResNet50 (Pre-trained on ImageNet)
+MobileNetV2 (Pre-trained on ImageNet, 3.5M params)
     ↓
-Global Average Pooling
+Global Average Pooling + BatchNorm
     ↓
-Dense(96) + BatchNorm + ReLU + Dropout(0.25)
-    ↓
-Dense(64) + BatchNorm + ReLU + Dropout(0.3)
-    ↓
-Dense(32) + BatchNorm + ReLU + Dropout(0.35)
+Dense(128) + BatchNorm + ReLU + Dropout(0.3)
     ↓
 Dense(3, softmax) → [Bored, Interested, Lacking_Focus]
 ```
@@ -244,14 +241,14 @@ Dense(3, softmax) → [Bored, Interested, Lacking_Focus]
 
 ### Phase 1: Feature Extraction (40% of epochs)
 
-- Freeze ResNet50 base model
+- Freeze MobileNetV2 base model
 - Train only the classification head
 - Initial learning rate: 2e-5
 - Early stopping with patience=10
 
 ### Phase 2: Fine-Tuning (60% of epochs)
 
-- Unfreeze last 30 layers of ResNet50
+- Unfreeze last 20 layers of MobileNetV2
 - Fine-tune with lower learning rate: 5e-6
 - Model checkpoint saves best weights
 - Early stopping with patience=10
@@ -281,7 +278,8 @@ All paths and settings are centralized in [`config/config.py`](config/config.py)
 BASE_DIR = os.path.abspath(os.getcwd())
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 MODEL_DIR = os.path.join(BASE_DIR, 'models')
-EMOTION_COLUMNS = ['Boredom', 'Engagement', 'Confusion', 'Frustration']
+NUM_CLASSES = 3
+CLASS_NAMES = {0: 'Bored', 1: 'Interested', 2: 'Lacking_Focus'}
 ```
 
 ## Contributing 🤝

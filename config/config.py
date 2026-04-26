@@ -1,41 +1,43 @@
 import os
 
+
 class Config:
     # Base directories
     BASE_DIR = os.path.abspath(os.getcwd())
     DATA_DIR = os.path.join(BASE_DIR, 'data')
     MODEL_DIR = os.path.join(BASE_DIR, 'models')
-    
+
     # Haar cascade path for face detection
-    CASCADE_PATH = os.path.join(BASE_DIR, 'config/haarcascade_frontalface_default.xml')
-    
-    # Data directories (with Raw Data and Processed Data)
+    FACE_CASCADE_PATH = os.path.join(BASE_DIR, 'config', 'haarcascade_frontalface_default.xml')
+
+    # Data directories
     RAW_DIR = os.path.join(DATA_DIR, 'raw')
-    ORIGINAL_PROCESSED_DATA_DIR = os.path.join(DATA_DIR, 'original_processed')
     PROCESSED_DATA_DIR = os.path.join(DATA_DIR, 'processed')
     BALANCE_PROCESSED_DATA_DIR = os.path.join(DATA_DIR, 'balance_processed')
-    
-    # Raw directories inside data directories
-    LABELS_DIR = os.path.join(DATA_DIR, 'raw/Labels')
-    DATASET_DIR = os.path.join(DATA_DIR, 'raw/DataSet')
-    PROCESSED_DATA_DIR = os.path.join(DATA_DIR, 'processed')
-    BALANCED_DIR = os.path.join(DATA_DIR, "balance_processed")
-    
-    PLOTS_DIR = os.path.join(BASE_DIR, 'plots')
+    ORIGINAL_PROCESSED_DATA_DIR = os.path.join(DATA_DIR, 'original_processed')
+
+    # Raw data subdirectories
+    LABELS_DIR = os.path.join(RAW_DIR, 'Labels')
+    DATASET_DIR = os.path.join(RAW_DIR, 'DataSet')
 
     # Label files
     LABEL_FILES = {
         'Train': os.path.join(LABELS_DIR, 'TrainLabels.csv'),
         'Validation': os.path.join(LABELS_DIR, 'ValidationLabels.csv'),
-        'Test': os.path.join(LABELS_DIR, 'TestLabels.csv')
+        'Test': os.path.join(LABELS_DIR, 'TestLabels.csv'),
     }
 
-    # Emotion columns for labeling
+    # Emotion columns used for labeling (from DAiSEE dataset)
     EMOTION_COLUMNS = ['Boredom', 'Engagement', 'Confusion', 'Frustration']
-    
-    # Metadata input and output that store in processed dir
+
+    # Model classification targets (mapped from emotion columns)
+    NUM_CLASSES = 3
+    CLASS_NAMES = {0: 'Bored', 1: 'Interested', 2: 'Lacking_Focus'}
+
+    # Metadata paths
     INPUT_METADATA = os.path.join(PROCESSED_DATA_DIR, 'metadata.csv')
     OUTPUT_METADATA = os.path.join(PROCESSED_DATA_DIR, 'balanced_metadata.csv')
-    
-    # Paths that store in models
-    EMOTIONAL_RECOGNITION_MODEL = os.path.join(MODEL_DIR, 'emotional_recognition_model.h5')
+
+    # Model file names
+    MODEL_FILENAME = 'emotion_recognition_model.h5'
+    CHECKPOINT_FILENAME = 'best_model.weights.h5'

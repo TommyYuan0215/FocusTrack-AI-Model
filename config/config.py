@@ -39,5 +39,6 @@ class Config:
     OUTPUT_METADATA = os.path.join(PROCESSED_DATA_DIR, 'balanced_metadata.csv')
 
     # Model file names
-    MODEL_FILENAME = 'emotion_recognition_model.h5'
-    CHECKPOINT_FILENAME = 'best_model.weights.h5'
+    MODEL_FILENAME = 'emotion_recognition_model.keras'       
+    TFLITE_MODEL_FILENAME = 'emotion_recognition_model.tflite' 
+    CHECKPOINT_FILENAME = 'best_model.weights.h5'             

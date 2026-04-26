@@ -77,10 +77,11 @@ FocusTrack-AI-Model/
 ├── step2_preprocess.py                    # Step 2: Video preprocessing pipeline
 ├── step3_balance.py                       # Step 3: Dataset balancing
 ├── step4_train.py                         # Step 4: Model training & evaluation
-├── step5_inference.py                     # Step 5: Real-time webcam inference
+├── step5_convert.py                       # Step 5: Convert model to TFLite format
+├── step6_inference.py                     # Step 6: Real-time webcam inference
 ├── check_gpu.py                           # GPU/CUDA verification utility
 ├── main.ipynb                             # Main Jupyter notebook (with outputs)
-├── requirements_resnet50_daisee.txt       # Python dependencies
+├── requirements.txt                       # Python dependencies
 └── README.md                              # This file
 ```
 
@@ -92,7 +93,7 @@ FocusTrack-AI-Model/
 - CUDA-compatible GPU (recommended)
 - 16GB+ RAM (for processing large datasets)
 
-See [`requirements_resnet50_daisee.txt`](requirements_resnet50_daisee.txt) for complete dependencies.
+See [`requirements.txt`](requirements.txt) for complete dependencies.
 
 ## Installation 📦
 
@@ -113,7 +114,7 @@ See [`requirements_resnet50_daisee.txt`](requirements_resnet50_daisee.txt) for c
 3. **Install dependencies**
 
    ```bash
-   pip install -r requirements_resnet50_daisee.txt
+   pip install -r requirements.txt
    ```
 
 4. **Verify CUDA installation** (optional, for GPU support)
@@ -168,17 +169,30 @@ python step4_train.py
 
 Training uses a two-phase approach:
 
-- **Phase 1**: Train classification head with frozen ResNet50 base
-- **Phase 2**: Fine-tune last 30 layers of ResNet50
+- **Phase 1**: Train classification head with frozen MobileNetV2 base
+- **Phase 2**: Fine-tune last 20 layers of MobileNetV2
 
 After training completes, the model is automatically evaluated on the test set.
 
-### Step 5: Real-Time Inference
+### Step 5: Convert to TFLite
+
+Convert the trained model to a highly optimized TensorFlow Lite format:
+
+```bash
+python step5_convert.py
+```
+
+This script will:
+- Load the heavy `.keras` model
+- Apply default optimizations to shrink the model size
+- Save a lightweight `.tflite` model optimized for real-time CPU inference
+
+### Step 6: Real-Time Inference
 
 Run real-time emotion detection using your webcam:
 
 ```bash
-python step5_inference.py
+python step6_inference.py
 ```
 
 This opens a webcam feed with:
@@ -293,8 +307,10 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Acknowledgments 🙏
 
 - **DAiSEE Dataset**: [Dataset for Affective States in E-Environments](https://iith.ac.in/~daisee-dataset/)
+- **MobileNetV2**: Inverted Residuals and Linear Bottlenecks (Sandler et al., 2018)
 - **ResNet50**: Deep Residual Learning for Image Recognition (He et al., 2015)
-- **TensorFlow/Keras**: Deep learning framework
+- **MediaPipe**: Fast, cross-platform face detection framework by Google
+- **TensorFlow & TFLite**: Deep learning framework and edge-optimized inference engine
 
 ## Contact 📧
 

@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 *.so
 .Python
+*.egg-info/
 
 # Editor directories and system files
 .vscode/
@@ -20,14 +21,18 @@ __pycache__/
 .ipynb_checkpoints/
 
 # Ignore venv files
-.venv_win/
+*venv/
+.venv/
+venv/
+env/
+virtualenv/
 
-# Ignore data (raw and processed) by default
-data/*
+# Ignore generated files
+models/*.keras
+models/*.csv
+*.log
+*.tmp
 
-# Large model files
-models/*.h5
-models/*.weights.h5
-
-# Project-specific archived directories
-**/archived/
+# Ignore data folders
+data/
+models/

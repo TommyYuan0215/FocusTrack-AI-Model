@@ -319,3 +319,7 @@ For questions or feedback, please open an issue on GitHub.
 ---
 
 **Note**: This project is for research and educational purposes. Ensure you have proper permissions to use the DAiSEE dataset according to their terms and conditions.
+
+---
+
+Last updated: 28/4/2026
